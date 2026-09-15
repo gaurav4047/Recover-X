@@ -119,6 +119,25 @@ impl RecoveryOrchestrator {
         db.list_recovered_files(session_id)
     }
 
+    /// Paginated, filtered query for the Results UI.
+    pub fn query_recovered_files(
+        &self,
+        session_id: &str,
+        category: Option<&str>,
+        search: Option<&str>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<RecoveredFile>> {
+        let db = self.db.lock().expect("db lock poisoned");
+        db.query_recovered_files(session_id, category, search, limit, offset)
+    }
+
+    /// Get file counts per category for the tab bar.
+    pub fn category_counts(&self, session_id: &str) -> Result<Vec<(String, i64)>> {
+        let db = self.db.lock().expect("db lock poisoned");
+        db.category_counts(session_id)
+    }
+
     /// List partitions for a session.
     pub fn list_partitions(&self, session_id: &str) -> Result<Vec<recoverx_engines::DetectedPartition>> {
         let db = self.db.lock().expect("db lock poisoned");

@@ -476,6 +476,103 @@ impl SessionDatabase {
         Ok(files)
     }
 
+    /// Paginated, filtered query for the Results UI.
+    pub fn query_recovered_files(
+        &self,
+        session_id: &str,
+        category: Option<&str>,   // extension category filter
+        search: Option<&str>,     // filename search
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<recoverx_engines::RecoveredFile>> {
+        // Build extension list for category
+        let ext_list = category.map(category_extensions);
+
+        let mut sql = format!(
+            "SELECT * FROM recovered_files WHERE session_id = ?1"
+        );
+
+        if ext_list.is_some() {
+            sql.push_str(" AND LOWER(extension) IN (SELECT value FROM json_each(?2))");
+        }
+        if search.is_some() {
+            let param = if ext_list.is_some() { "?3" } else { "?2" };
+            sql.push_str(&format!(" AND LOWER(name) LIKE {}", param));
+        }
+        sql.push_str(" ORDER BY confidence DESC, name ASC LIMIT ?");
+        sql.push_str(&format!(" OFFSET {}", offset));
+
+        // Build params dynamically
+        let mut stmt = self.conn.prepare(&sql).map_err(db_err)?;
+
+        let ext_json = ext_list.as_ref().map(|v| serde_json::to_string(v).unwrap_or_default());
+        let search_pattern = search.map(|s| format!("%{}%", s.to_lowercase()));
+
+        let param_count = 1
+            + if ext_json.is_some() { 1 } else { 0 }
+            + if search_pattern.is_some() { 1 } else { 0 }
+            + 1; // limit
+
+        // Use rusqlite's dynamic param approach
+        let rows: Vec<recoverx_engines::RecoveredFile> = match (ext_json.as_deref(), search_pattern.as_deref()) {
+            (None, None) => {
+                stmt.query_map(params![session_id, limit], row_to_recovered_file)
+                    .map_err(db_err)?
+                    .filter_map(|r| r.ok())
+                    .collect()
+            }
+            (Some(ext), None) => {
+                stmt.query_map(params![session_id, ext, limit], row_to_recovered_file)
+                    .map_err(db_err)?
+                    .filter_map(|r| r.ok())
+                    .collect()
+            }
+            (None, Some(s)) => {
+                stmt.query_map(params![session_id, s, limit], row_to_recovered_file)
+                    .map_err(db_err)?
+                    .filter_map(|r| r.ok())
+                    .collect()
+            }
+            (Some(ext), Some(s)) => {
+                stmt.query_map(params![session_id, ext, s, limit], row_to_recovered_file)
+                    .map_err(db_err)?
+                    .filter_map(|r| r.ok())
+                    .collect()
+            }
+        };
+
+        Ok(rows)
+    }
+
+    /// Get counts per category for the tab bar.
+    pub fn category_counts(&self, session_id: &str) -> Result<Vec<(String, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT LOWER(COALESCE(extension, '')) as ext, COUNT(*) as cnt
+             FROM recovered_files WHERE session_id = ?1
+             GROUP BY ext"
+        ).map_err(db_err)?;
+
+        let rows = stmt.query_map(params![session_id], |row| {
+            let ext: String = row.get(0)?;
+            let cnt: i64 = row.get(1)?;
+            Ok((ext, cnt))
+        }).map_err(db_err)?;
+
+        let mut ext_counts: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        let mut total: i64 = 0;
+
+        for row in rows.flatten() {
+            let cat = ext_to_category(&row.0);
+            *ext_counts.entry(cat).or_insert(0) += row.1;
+            total += row.1;
+        }
+
+        let mut result: Vec<(String, i64)> = ext_counts.into_iter().collect();
+        result.sort_by(|a, b| b.1.cmp(&a.1));
+        result.insert(0, ("All".to_string(), total));
+        Ok(result)
+    }
+
     /// Delete all recovered files for a session (before re-indexing).
     pub fn clear_recovered_files(&self, session_id: &str) -> Result<()> {
         self.conn.execute(
@@ -554,6 +651,93 @@ impl SessionDatabase {
 }
 
 // ── Row deserialisation ───────────────────────────────────────────────────────
+
+fn row_to_recovered_file(row: &rusqlite::Row) -> rusqlite::Result<recoverx_engines::RecoveredFile> {
+    use recoverx_engines::{FileFragment, FileStatus, RecoveredFile, RecoveryMethod};
+    use uuid::Uuid;
+
+    let id_str: String = row.get("id")?;
+    let fragments_json: String = row.get("fragments_json").unwrap_or_default();
+    let metadata_json: String = row.get("metadata_json").unwrap_or_default();
+    let fragments: Vec<FileFragment> = serde_json::from_str(&fragments_json).unwrap_or_default();
+    let metadata: serde_json::Value = serde_json::from_str(&metadata_json)
+        .unwrap_or(serde_json::Value::Null);
+
+    let status_str: String = row.get("status")?;
+    let status = match status_str.as_str() {
+        "complete" | "Complete" => FileStatus::Complete,
+        "partial" | "Partial" => FileStatus::Partial,
+        "fragmented" | "Fragmented" => FileStatus::Fragmented,
+        "corrupted" | "Corrupted" => FileStatus::Corrupted,
+        "encrypted" | "Encrypted" => FileStatus::Encrypted,
+        _ => FileStatus::Partial,
+    };
+    let method_str: String = row.get("recovery_method")?;
+    let recovery_method = match method_str.as_str() {
+        "MFT Record" => RecoveryMethod::MftRecord,
+        "Inode Record" => RecoveryMethod::InodeRecord,
+        "Directory Entry" => RecoveryMethod::DirectoryEntry,
+        "File Carving" => RecoveryMethod::FileCarving,
+        "Hybrid Reconstruction" => RecoveryMethod::HybridReconstruction,
+        _ => RecoveryMethod::FilesystemMetadata,
+    };
+    let parse_dt = |s: Option<String>| -> Option<chrono::DateTime<chrono::Utc>> {
+        s.and_then(|ts| chrono::DateTime::parse_from_rfc3339(&ts).ok())
+         .map(|dt| dt.with_timezone(&chrono::Utc))
+    };
+    Ok(RecoveredFile {
+        id: Uuid::parse_str(&id_str).unwrap_or_else(|_| Uuid::new_v4()),
+        session_id: row.get("session_id")?,
+        name: row.get("name")?,
+        original_path: row.get("original_path")?,
+        size_bytes: row.get::<_, i64>("size_bytes")? as u64,
+        source_offset: row.get::<_, i64>("source_offset")? as u64,
+        partition_index: row.get::<_, Option<i64>>("partition_index")?.map(|v| v as u32),
+        filesystem_type: row.get("filesystem_type")?,
+        recovery_method,
+        confidence: row.get::<_, i64>("confidence")? as u8,
+        status,
+        sha256: row.get("sha256")?,
+        created_at: parse_dt(row.get("created_at_file")?),
+        modified_at: parse_dt(row.get("modified_at_file")?),
+        accessed_at: parse_dt(row.get("accessed_at_file")?),
+        extension: row.get("extension")?,
+        mime_type: row.get("mime_type")?,
+        is_deleted: row.get::<_, i64>("is_deleted")? != 0,
+        is_fragmented: row.get::<_, i64>("is_fragmented")? != 0,
+        fragments,
+        metadata,
+    })
+}
+
+/// Map an extension to a display category name.
+fn ext_to_category(ext: &str) -> String {
+    match ext {
+        "jpg" | "jpeg" | "png" | "gif" | "bmp" | "tiff" | "webp" | "heic" | "svg" | "ico" | "raw" => "Images",
+        "mp4" | "mov" | "avi" | "mkv" | "mpeg" | "mpg" | "wmv" | "flv" | "m4v" | "webm" => "Videos",
+        "mp3" | "wav" | "flac" | "ogg" | "m4a" | "aac" | "wma" | "aiff" => "Audio",
+        "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "txt" | "rtf" | "csv" | "pages" | "numbers" | "key" | "odt" | "ods" | "odp" => "Documents",
+        "zip" | "rar" | "7z" | "tar" | "gz" | "bz2" | "xz" | "dmg" | "pkg" | "deb" | "rpm" => "Archives",
+        "sqlite" | "db" | "sql" | "mdb" | "accdb" => "Databases",
+        "html" | "htm" | "css" | "js" | "ts" | "jsx" | "tsx" | "json" | "xml" | "yaml" | "yml" | "toml" | "md" | "rs" | "py" | "swift" | "java" | "kt" | "go" | "cpp" | "c" | "h" => "Code",
+        "" => "Other",
+        _ => "Other",
+    }.to_string()
+}
+
+/// Return a JSON array of extensions for a given category name.
+fn category_extensions(category: &str) -> Vec<String> {
+    match category {
+        "Images" => vec!["jpg","jpeg","png","gif","bmp","tiff","webp","heic","svg","ico","raw"],
+        "Videos" => vec!["mp4","mov","avi","mkv","mpeg","mpg","wmv","flv","m4v","webm"],
+        "Audio"  => vec!["mp3","wav","flac","ogg","m4a","aac","wma","aiff"],
+        "Documents" => vec!["pdf","doc","docx","xls","xlsx","ppt","pptx","txt","rtf","csv","pages","numbers","key","odt","ods","odp"],
+        "Archives" => vec!["zip","rar","7z","tar","gz","bz2","xz","dmg","pkg","deb","rpm"],
+        "Databases" => vec!["sqlite","db","sql","mdb","accdb"],
+        "Code" => vec!["html","htm","css","js","ts","jsx","tsx","json","xml","yaml","yml","toml","md","rs","py","swift","java","kt","go","cpp","c","h"],
+        _ => vec![],
+    }.into_iter().map(|s| s.to_string()).collect()
+}
 
 fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<ScanSession> {
     let id_str: String = row.get("id")?;

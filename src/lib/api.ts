@@ -241,6 +241,18 @@ export const api = {
   listRecoveredFiles: (sessionId: string): Promise<RecoveredFile[]> =>
     invoke("list_recovered_files", { sessionId }),
 
+  queryRecoveredFiles: (
+    sessionId: string,
+    category: string | null,
+    search: string | null,
+    limit: number,
+    offset: number
+  ): Promise<RecoveredFile[]> =>
+    invoke("query_recovered_files", { sessionId, category, search, limit, offset }),
+
+  getCategoryCounts: (sessionId: string): Promise<[string, number][]> =>
+    invoke("get_category_counts", { sessionId }),
+
   listPartitions: (sessionId: string): Promise<DetectedPartition[]> =>
     invoke("list_partitions", { sessionId }),
 

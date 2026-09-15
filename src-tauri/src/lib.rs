@@ -39,6 +39,8 @@ pub fn run() {
             commands::scan::cancel_scan,
             // Results and recovery commands
             commands::results::list_recovered_files,
+            commands::results::query_recovered_files,
+            commands::results::get_category_counts,
             commands::results::list_partitions,
             commands::results::recover_files,
             commands::results::verify_file_hash,

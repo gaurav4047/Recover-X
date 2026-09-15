@@ -20,6 +20,40 @@ pub async fn list_recovered_files(
         .map_err(|e| e.to_string())
 }
 
+/// Paginated + filtered query — used by the Results screen for fast loading.
+#[tauri::command]
+pub async fn query_recovered_files(
+    state: State<'_, AppState>,
+    session_id: String,
+    category: Option<String>,  // "Images", "Videos", "Documents", etc. or None for all
+    search: Option<String>,    // filename substring filter
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<RecoveredFile>, String> {
+    let orchestrator = state.orchestrator().map_err(|e| e.to_string())?;
+    orchestrator
+        .query_recovered_files(
+            &session_id,
+            category.as_deref(),
+            search.as_deref(),
+            limit,
+            offset,
+        )
+        .map_err(|e| e.to_string())
+}
+
+/// Get file counts per category for the tab bar.
+#[tauri::command]
+pub async fn get_category_counts(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<(String, i64)>, String> {
+    let orchestrator = state.orchestrator().map_err(|e| e.to_string())?;
+    orchestrator
+        .category_counts(&session_id)
+        .map_err(|e| e.to_string())
+}
+
 /// List partitions detected during a scan session.
 #[tauri::command]
 pub async fn list_partitions(

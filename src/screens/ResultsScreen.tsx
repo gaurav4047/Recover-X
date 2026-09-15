@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api, formatBytes, confidenceColor, fileStatusLabel, fileIcon } from "../lib/api";
 import type { RecoveredFile, ScanSession } from "../lib/api";
@@ -8,8 +8,19 @@ interface LocationState {
   session?: ScanSession;
 }
 
-type SortKey = "name" | "size" | "confidence" | "modified";
-type FilterStatus = "all" | "complete" | "partial" | "fragmented" | "corrupted";
+const PAGE_SIZE = 100;
+
+const CATEGORY_ICONS: Record<string, string> = {
+  All: "📁",
+  Images: "🖼️",
+  Videos: "🎬",
+  Audio: "🎵",
+  Documents: "📄",
+  Archives: "📦",
+  Databases: "🗄️",
+  Code: "💻",
+  Other: "📎",
+};
 
 export function ResultsScreen() {
   const location = useLocation();
@@ -19,18 +30,30 @@ export function ResultsScreen() {
   const [sessionId, setSessionId] = useState<string | null>(
     locState.sessionId ?? locState.session?.id ?? null
   );
+
+  // Category tabs
+  const [categories, setCategories] = useState<[string, number][]>([]);
+  const [activeCategory, setActiveCategory] = useState<string>("All");
+
+  // File list
   const [files, setFiles] = useState<RecoveredFile[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [offset, setOffset] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [search, setSearch] = useState("");
-  const [filterExt, setFilterExt] = useState("");
-  const [filterStatus, setFilterStatus] = useState<FilterStatus>("all");
-  const [minConfidence, setMinConfidence] = useState(0);
-  const [sortKey, setSortKey] = useState<SortKey>("confidence");
-  const [sortAsc, setSortAsc] = useState(false);
 
-  // Load from most recent completed session if none specified
+  // Search
+  const [search, setSearch] = useState("");
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Selection
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  // Scroll container ref for infinite scroll
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Load most recent completed session if none specified
   useEffect(() => {
     if (!sessionId) {
       api.listSessions().then((sessions) => {
@@ -40,90 +63,87 @@ export function ResultsScreen() {
     }
   }, []);
 
+  // Load category counts whenever sessionId changes
   useEffect(() => {
     if (!sessionId) return;
-    setLoading(true);
-    setError(null);
-    api.listRecoveredFiles(sessionId)
-      .then((f) => {
-        setFiles(f);
-        setLoading(false);
-      })
-      .catch((e) => {
-        setError(String(e));
-        setLoading(false);
-      });
+    api.getCategoryCounts(sessionId).then((counts) => {
+      setCategories(counts);
+    }).catch(() => {});
   }, [sessionId]);
 
-  // All unique extensions for the filter dropdown
-  const extensions = useMemo(() => {
-    const exts = new Set<string>();
-    files.forEach((f) => { if (f.extension) exts.add(f.extension.toLowerCase()); });
-    return Array.from(exts).sort();
-  }, [files]);
+  // Reset and reload when category or search changes
+  useEffect(() => {
+    if (!sessionId) return;
+    setFiles([]);
+    setOffset(0);
+    setHasMore(true);
+    setSelected(new Set());
+    loadPage(0, activeCategory, search);
+  }, [sessionId, activeCategory]);
 
-  // Filtered + sorted file list
-  const filtered = useMemo(() => {
-    let result = files;
+  // Debounced search
+  const handleSearch = (value: string) => {
+    setSearch(value);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      setFiles([]);
+      setOffset(0);
+      setHasMore(true);
+      setSelected(new Set());
+      loadPage(0, activeCategory, value);
+    }, 300);
+  };
 
-    if (search) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (f) =>
-          f.name.toLowerCase().includes(q) ||
-          (f.original_path ?? "").toLowerCase().includes(q)
-      );
-    }
-    if (filterExt) {
-      result = result.filter((f) => f.extension?.toLowerCase() === filterExt);
-    }
-    if (filterStatus !== "all") {
-      result = result.filter((f) => f.status === filterStatus);
-    }
-    if (minConfidence > 0) {
-      result = result.filter((f) => f.confidence >= minConfidence);
-    }
+  const loadPage = useCallback(async (
+    pageOffset: number,
+    category: string,
+    searchVal: string
+  ) => {
+    if (!sessionId) return;
+    if (pageOffset === 0) setLoading(true); else setLoadingMore(true);
+    setError(null);
 
-    result = [...result].sort((a, b) => {
-      let cmp = 0;
-      switch (sortKey) {
-        case "name": cmp = a.name.localeCompare(b.name); break;
-        case "size": cmp = a.size_bytes - b.size_bytes; break;
-        case "confidence": cmp = a.confidence - b.confidence; break;
-        case "modified":
-          cmp = (a.modified_at ?? "").localeCompare(b.modified_at ?? ""); break;
-      }
-      return sortAsc ? cmp : -cmp;
-    });
+    try {
+      const cat = category === "All" ? null : category;
+      const srch = searchVal.trim() || null;
+      const page = await api.queryRecoveredFiles(sessionId, cat, srch, PAGE_SIZE, pageOffset);
+      setFiles((prev) => pageOffset === 0 ? page : [...prev, ...page]);
+      setOffset(pageOffset + page.length);
+      setHasMore(page.length === PAGE_SIZE);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }, [sessionId]);
 
-    return result;
-  }, [files, search, filterExt, filterStatus, minConfidence, sortKey, sortAsc]);
+  // Infinite scroll handler
+  const handleScroll = useCallback(() => {
+    if (!scrollRef.current || loadingMore || !hasMore) return;
+    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+    if (scrollHeight - scrollTop - clientHeight < 200) {
+      loadPage(offset, activeCategory, search);
+    }
+  }, [offset, activeCategory, search, loadingMore, hasMore, loadPage]);
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
       const s = new Set(prev);
-      if (s.has(id)) s.delete(id); else s.add(id);
+      s.has(id) ? s.delete(id) : s.add(id);
       return s;
     });
   };
 
-  const selectAll = () => setSelected(new Set(filtered.map((f) => f.id)));
+  const selectAll = () => setSelected(new Set(files.map((f) => f.id)));
   const clearAll = () => setSelected(new Set());
 
   const handleRecover = () => {
-    if (selected.size === 0) return;
-    navigate("/recovery", {
-      state: {
-        sessionId,
-        fileIds: Array.from(selected),
-      },
-    });
+    if (!sessionId || selected.size === 0) return;
+    navigate("/recovery", { state: { sessionId, fileIds: Array.from(selected) } });
   };
 
-  const toggleSort = (key: SortKey) => {
-    if (sortKey === key) setSortAsc((a) => !a);
-    else { setSortKey(key); setSortAsc(false); }
-  };
+  const totalInCategory = categories.find(([c]) => c === activeCategory)?.[1] ?? 0;
 
   if (!sessionId) {
     return (
@@ -131,9 +151,9 @@ export function ResultsScreen() {
         <div className="empty-state">
           <div className="empty-icon">📋</div>
           <h3>No scan results yet</h3>
-          <p>Run a scan from the Devices screen to find recoverable files.</p>
-          <button className="btn btn-primary" style={{ marginTop: "20px" }} onClick={() => navigate("/devices")}>
-            Scan a Device
+          <p>Run a scan to find recoverable files.</p>
+          <button className="btn btn-primary" style={{ marginTop: "20px" }} onClick={() => navigate("/scan-setup")}>
+            Start a Scan
           </button>
         </div>
       </div>
@@ -141,206 +161,159 @@ export function ResultsScreen() {
   }
 
   return (
-    <div style={{ padding: "24px", height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px", flexShrink: 0 }}>
-        <div>
-          <h2>Recovery Results</h2>
-          <p style={{ color: "var(--text-secondary)", marginTop: "4px", fontSize: "0.875rem" }}>
-            {loading ? "Loading…" : `${filtered.length.toLocaleString()} of ${files.length.toLocaleString()} files`}
-            {selected.size > 0 && ` · ${selected.size} selected`}
-          </p>
-        </div>
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button className="btn btn-secondary" onClick={() => navigate("/sessions")}>
-            Change Session
-          </button>
-          <button
-            className="btn btn-primary"
-            onClick={handleRecover}
-            disabled={selected.size === 0}
-          >
-            ↗ Recover {selected.size > 0 ? `(${selected.size})` : "Selected"}
-          </button>
-        </div>
-      </div>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
 
-      {error && <div className="alert alert-error" style={{ marginBottom: "12px" }}>{error}</div>}
+      {/* ── Header ── */}
+      <div style={{ padding: "16px 20px 0", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+          <div>
+            <h2 style={{ fontSize: "1.25rem" }}>Recovery Results</h2>
+            <p style={{ color: "var(--text-secondary)", fontSize: "0.8125rem", marginTop: "2px" }}>
+              {loading ? "Loading…" : `${totalInCategory.toLocaleString()} files · ${files.length.toLocaleString()} loaded`}
+              {selected.size > 0 && ` · ${selected.size} selected`}
+            </p>
+          </div>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button className="btn btn-secondary" onClick={() => navigate("/sessions")}>
+              Change Session
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={handleRecover}
+              disabled={selected.size === 0}
+            >
+              ↗ Recover {selected.size > 0 ? `(${selected.size})` : "Selected"}
+            </button>
+          </div>
+        </div>
 
-      {/* Filters */}
-      <div style={{ display: "flex", gap: "8px", marginBottom: "12px", flexShrink: 0, flexWrap: "wrap" }}>
-        <input
-          className="form-input"
-          style={{ width: "220px" }}
-          type="text"
-          placeholder="Search by filename…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <select
-          className="form-select"
-          style={{ width: "120px" }}
-          value={filterExt}
-          onChange={(e) => setFilterExt(e.target.value)}
-        >
-          <option value="">All types</option>
-          {extensions.map((ext) => (
-            <option key={ext} value={ext}>{ext.toUpperCase()}</option>
+        {error && <div className="alert alert-error" style={{ marginBottom: "8px" }}>{error}</div>}
+
+        {/* ── Category tabs ── */}
+        <div style={{ display: "flex", gap: "6px", overflowX: "auto", paddingBottom: "4px" }}>
+          {categories.map(([cat, count]) => (
+            <button
+              key={cat}
+              onClick={() => setActiveCategory(cat)}
+              style={{
+                padding: "6px 14px",
+                background: activeCategory === cat ? "var(--accent-blue)" : "var(--bg-secondary)",
+                border: `1px solid ${activeCategory === cat ? "var(--accent-blue)" : "var(--border)"}`,
+                borderRadius: "20px",
+                color: activeCategory === cat ? "#fff" : "var(--text-secondary)",
+                cursor: "pointer",
+                fontSize: "0.8125rem",
+                fontWeight: activeCategory === cat ? 600 : 400,
+                whiteSpace: "nowrap",
+                display: "flex",
+                alignItems: "center",
+                gap: "5px",
+                flexShrink: 0,
+              }}
+            >
+              <span>{CATEGORY_ICONS[cat] ?? "📎"}</span>
+              {cat}
+              <span style={{
+                background: activeCategory === cat ? "rgba(255,255,255,0.25)" : "var(--bg-tertiary)",
+                borderRadius: "10px",
+                padding: "1px 6px",
+                fontSize: "0.7rem",
+                fontWeight: 700,
+              }}>
+                {count.toLocaleString()}
+              </span>
+            </button>
           ))}
-        </select>
-        <select
-          className="form-select"
-          style={{ width: "140px" }}
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value as FilterStatus)}
-        >
-          <option value="all">All status</option>
-          <option value="complete">Complete</option>
-          <option value="partial">Partial</option>
-          <option value="fragmented">Fragmented</option>
-          <option value="corrupted">Corrupted</option>
-        </select>
-        <select
-          className="form-select"
-          style={{ width: "140px" }}
-          value={minConfidence}
-          onChange={(e) => setMinConfidence(Number(e.target.value))}
-        >
-          <option value={0}>Any confidence</option>
-          <option value={50}>≥ 50%</option>
-          <option value={75}>≥ 75%</option>
-          <option value={90}>≥ 90%</option>
-        </select>
-        <div style={{ display: "flex", gap: "6px", marginLeft: "auto" }}>
-          <button className="btn btn-ghost" onClick={selectAll} style={{ fontSize: "0.8125rem" }}>Select All</button>
-          <button className="btn btn-ghost" onClick={clearAll} style={{ fontSize: "0.8125rem" }}>Clear</button>
         </div>
-      </div>
 
-      {/* Table header */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "32px 2fr 1fr 80px 100px 120px",
-        gap: "8px",
-        padding: "8px 12px",
-        fontSize: "0.75rem",
-        color: "var(--text-muted)",
-        textTransform: "uppercase",
-        letterSpacing: "0.06em",
-        borderBottom: "1px solid var(--border)",
-        flexShrink: 0,
-      }}>
-        <span />
-        <button
-          style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", textAlign: "left", fontSize: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}
-          onClick={() => toggleSort("name")}
-        >
-          Name {sortKey === "name" ? (sortAsc ? "↑" : "↓") : ""}
-        </button>
-        <span>Path</span>
-        <button
-          style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", textAlign: "left", fontSize: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}
-          onClick={() => toggleSort("size")}
-        >
-          Size {sortKey === "size" ? (sortAsc ? "↑" : "↓") : ""}
-        </button>
-        <button
-          style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", textAlign: "left", fontSize: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}
-          onClick={() => toggleSort("confidence")}
-        >
-          Confidence {sortKey === "confidence" ? (sortAsc ? "↑" : "↓") : ""}
-        </button>
-        <span>Status</span>
-      </div>
-
-      {/* File list */}
-      {loading ? (
-        <div className="empty-state" style={{ flex: 1 }}>
-          <div className="empty-icon">⏳</div>
-          <h3>Loading results…</h3>
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="empty-state" style={{ flex: 1 }}>
-          <div className="empty-icon">📋</div>
-          <h3>{files.length === 0 ? "No recoverable files found" : "No files match your filters"}</h3>
-          {files.length === 0 && (
-            <p>The scan completed but no recoverable files were detected on this source.</p>
+        {/* ── Search + select controls ── */}
+        <div style={{ display: "flex", gap: "8px", margin: "10px 0 8px", alignItems: "center" }}>
+          <input
+            className="form-input"
+            style={{ maxWidth: "280px" }}
+            type="text"
+            placeholder="Search by filename…"
+            value={search}
+            onChange={(e) => handleSearch(e.target.value)}
+          />
+          <button className="btn btn-ghost" style={{ fontSize: "0.8125rem" }} onClick={selectAll}>
+            Select All
+          </button>
+          {selected.size > 0 && (
+            <button className="btn btn-ghost" style={{ fontSize: "0.8125rem" }} onClick={clearAll}>
+              Clear
+            </button>
           )}
         </div>
-      ) : (
-        <div style={{ flex: 1, overflow: "auto" }}>
-          {filtered.map((file) => (
-            <div
-              key={file.id}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "32px 2fr 1fr 80px 100px 120px",
-                gap: "8px",
-                padding: "8px 12px",
-                borderBottom: "1px solid var(--border)",
-                background: selected.has(file.id) ? "var(--bg-tertiary)" : "transparent",
-                cursor: "pointer",
-                alignItems: "center",
-                fontSize: "0.8125rem",
-              }}
-              onClick={() => toggleSelect(file.id)}
-            >
-              <input
-                type="checkbox"
-                checked={selected.has(file.id)}
-                onChange={() => toggleSelect(file.id)}
-                onClick={(e) => e.stopPropagation()}
-                style={{ accentColor: "var(--accent-blue)" }}
-              />
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", overflow: "hidden" }}>
-                <span style={{ fontSize: "1rem", flexShrink: 0 }}>{fileIcon(file.extension)}</span>
-                <div style={{ overflow: "hidden" }}>
-                  <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {file.name}
-                    {!file.original_path && (
-                      <span style={{ marginLeft: "6px", fontSize: "0.7rem", color: "var(--text-muted)" }}>(carved)</span>
-                    )}
-                  </div>
-                  <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
-                    {file.filesystem_type ?? file.recovery_method}
-                    {file.is_fragmented && " · fragmented"}
-                  </div>
-                </div>
-              </div>
-              <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-muted)", fontSize: "0.75rem" }}>
-                {file.original_path ?? "—"}
-              </div>
-              <div>{formatBytes(file.size_bytes)}</div>
-              <div style={{ color: confidenceColor(file.confidence) }}>
-                {file.confidence}%
-              </div>
-              <div>
-                <span style={{
-                  fontSize: "0.7rem",
-                  padding: "2px 6px",
-                  borderRadius: "4px",
-                  background:
-                    file.status === "complete" ? "#052e16" :
-                    file.status === "partial" ? "#451a03" :
-                    file.status === "corrupted" ? "#450a0a" : "#1e293b",
-                  color:
-                    file.status === "complete" ? "#bbf7d0" :
-                    file.status === "partial" ? "#fde68a" :
-                    file.status === "corrupted" ? "#fecaca" : "#94a3b8",
-                }}>
-                  {fileStatusLabel(file.status)}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
 
-      {/* Bottom action bar */}
+        {/* ── Table header ── */}
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "32px 1fr 90px 90px 110px",
+          gap: "8px",
+          padding: "6px 10px",
+          fontSize: "0.7rem",
+          color: "var(--text-muted)",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          borderBottom: "1px solid var(--border)",
+        }}>
+          <span />
+          <span>Name / Path</span>
+          <span>Size</span>
+          <span>Confidence</span>
+          <span>Status</span>
+        </div>
+      </div>
+
+      {/* ── File list (scrollable) ── */}
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        style={{ flex: 1, overflow: "auto", padding: "0 20px" }}
+      >
+        {loading && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "40px", color: "var(--text-muted)", gap: "10px" }}>
+            <div style={{ width: "16px", height: "16px", border: "2px solid var(--accent-blue)", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+            Loading files…
+          </div>
+        )}
+
+        {!loading && files.length === 0 && (
+          <div className="empty-state" style={{ padding: "60px 20px" }}>
+            <div className="empty-icon">📋</div>
+            <h3>No files found</h3>
+            <p>{search ? "Try a different search term." : "No files in this category."}</p>
+          </div>
+        )}
+
+        {files.map((file) => (
+          <FileRow
+            key={file.id}
+            file={file}
+            selected={selected.has(file.id)}
+            onToggle={() => toggleSelect(file.id)}
+          />
+        ))}
+
+        {loadingMore && (
+          <div style={{ textAlign: "center", padding: "16px", color: "var(--text-muted)", fontSize: "0.8125rem" }}>
+            Loading more…
+          </div>
+        )}
+
+        {!hasMore && files.length > 0 && (
+          <div style={{ textAlign: "center", padding: "16px", color: "var(--text-muted)", fontSize: "0.75rem" }}>
+            All {files.length.toLocaleString()} files loaded
+          </div>
+        )}
+      </div>
+
+      {/* ── Bottom action bar ── */}
       {selected.size > 0 && (
         <div style={{
           flexShrink: 0,
-          padding: "12px",
+          padding: "12px 20px",
           borderTop: "1px solid var(--border)",
           display: "flex",
           alignItems: "center",
@@ -349,20 +322,95 @@ export function ResultsScreen() {
         }}>
           <span style={{ color: "var(--text-secondary)", fontSize: "0.875rem" }}>
             {selected.size} file{selected.size !== 1 ? "s" : ""} selected ·{" "}
-            {formatBytes(
-              filtered
-                .filter((f) => selected.has(f.id))
-                .reduce((sum, f) => sum + f.size_bytes, 0)
-            )}
+            {formatBytes(files.filter((f) => selected.has(f.id)).reduce((s, f) => s + f.size_bytes, 0))}
           </span>
           <button className="btn btn-primary" onClick={handleRecover}>
             ↗ Recover Selected
           </button>
-          <button className="btn btn-ghost" onClick={clearAll}>
-            Clear Selection
-          </button>
+          <button className="btn btn-ghost" onClick={clearAll}>Clear</button>
         </div>
       )}
+
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
+    </div>
+  );
+}
+
+// ── Single file row (memoized for performance) ────────────────────────────────
+
+interface FileRowProps {
+  file: RecoveredFile;
+  selected: boolean;
+  onToggle: () => void;
+}
+
+function FileRow({ file, selected, onToggle }: FileRowProps) {
+  return (
+    <div
+      onClick={onToggle}
+      style={{
+        display: "grid",
+        gridTemplateColumns: "32px 1fr 90px 90px 110px",
+        gap: "8px",
+        padding: "7px 10px",
+        borderBottom: "1px solid var(--border)",
+        background: selected ? "rgba(59,130,246,0.08)" : "transparent",
+        cursor: "pointer",
+        alignItems: "center",
+        fontSize: "0.8125rem",
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={selected}
+        onChange={onToggle}
+        onClick={(e) => e.stopPropagation()}
+        style={{ accentColor: "var(--accent-blue)", cursor: "pointer" }}
+      />
+
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <span style={{ fontSize: "1rem", flexShrink: 0 }}>{fileIcon(file.extension)}</span>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>
+            {file.name}
+          </span>
+          {!file.original_path && (
+            <span style={{ fontSize: "0.65rem", color: "var(--text-muted)", flexShrink: 0 }}>carved</span>
+          )}
+        </div>
+        <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: "1px" }}>
+          {file.original_path ?? (file.filesystem_type ?? file.recovery_method)}
+        </div>
+      </div>
+
+      <div style={{ color: "var(--text-secondary)" }}>
+        {formatBytes(file.size_bytes)}
+      </div>
+
+      <div style={{ color: confidenceColor(file.confidence), fontWeight: 600 }}>
+        {file.confidence}%
+      </div>
+
+      <div>
+        <span style={{
+          fontSize: "0.7rem",
+          padding: "2px 7px",
+          borderRadius: "4px",
+          background:
+            file.status === "complete" ? "#052e16" :
+            file.status === "partial"  ? "#451a03" :
+            file.status === "corrupted"? "#450a0a" : "#1e293b",
+          color:
+            file.status === "complete" ? "#bbf7d0" :
+            file.status === "partial"  ? "#fde68a" :
+            file.status === "corrupted"? "#fecaca" : "#94a3b8",
+          whiteSpace: "nowrap",
+        }}>
+          {fileStatusLabel(file.status)}
+        </span>
+      </div>
     </div>
   );
 }
