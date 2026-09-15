@@ -1,0 +1,48 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/recoverx-core",
+    "crates/recoverx-storage",
+    "crates/recoverx-orchestrator",
+    "crates/recoverx-devices",
+    "crates/recoverx-logging",
+    "crates/recoverx-engines",
+    "src-tauri",
+    "recoverx-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["RecoverX Team"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/recoverx/recoverx"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# Database
+rusqlite = { version = "0.31", features = ["bundled"] }
+# UUID
+uuid = { version = "1.10", features = ["v4", "serde"] }
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+# Hashing
+sha2 = "0.10"
+md-5 = "0.10"
+hex = "0.4"
+# Channel
+crossbeam-channel = "0.5"
+# Once cell
+once_cell = "1.19"
+# Base64
+base64 = "0.22"

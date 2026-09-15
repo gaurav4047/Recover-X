@@ -1,0 +1,28 @@
+[package]
+name = "recoverx-orchestrator"
+version.workspace = true
+edition.workspace = true
+description = "Recovery orchestrator, task system, scan sessions, and event system for RecoverX"
+
+[dependencies]
+recoverx-core = { path = "../recoverx-core" }
+recoverx-storage = { path = "../recoverx-storage" }
+recoverx-engines = { path = "../recoverx-engines" }
+recoverx-logging = { path = "../recoverx-logging" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+rusqlite = { workspace = true }
+crossbeam-channel = { workspace = true }
+once_cell = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.12"
+tokio = { workspace = true }

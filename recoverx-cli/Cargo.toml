@@ -1,0 +1,23 @@
+[package]
+name = "recoverx-cli"
+version.workspace = true
+edition.workspace = true
+description = "Command-line interface for RecoverX"
+
+[[bin]]
+name = "recoverx"
+path = "src/main.rs"
+
+[dependencies]
+recoverx-core = { path = "../crates/recoverx-core" }
+recoverx-storage = { path = "../crates/recoverx-storage" }
+recoverx-devices = { path = "../crates/recoverx-devices" }
+recoverx-orchestrator = { path = "../crates/recoverx-orchestrator" }
+recoverx-logging = { path = "../crates/recoverx-logging" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+clap = { version = "4.5", features = ["derive"] }

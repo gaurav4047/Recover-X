@@ -1,0 +1,23 @@
+[package]
+name = "recoverx-engines"
+version.workspace = true
+edition.workspace = true
+description = "Recovery engines: partition detection, filesystem analysis, file carving"
+
+[dependencies]
+recoverx-core = { path = "../recoverx-core" }
+recoverx-storage = { path = "../recoverx-storage" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+base64 = "0.22"
+
+[dev-dependencies]
+tempfile = "3.12"
