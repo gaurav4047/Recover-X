@@ -116,7 +116,6 @@ export function ResultsScreen() {
       state: {
         sessionId,
         fileIds: Array.from(selected),
-        sourcePath: files[0]?.session_id ? undefined : undefined,
       },
     });
   };
