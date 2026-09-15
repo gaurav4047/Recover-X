@@ -55,17 +55,19 @@ pub fn get_common_locations() -> Vec<CommonLocation> {
         ("Audio",     "🎵", home.join("Music")),
     ];
 
-    for (label, icon, folder_path) in folders {
+    for (label, icon, _folder_path) in folders {
+        // macOS does not record original folder in ~/.Trash metadata,
+        // so we scan all Trash files and show them regardless of origin.
         locations.push(CommonLocation {
             label: label.to_string(),
-            path: trash_path.clone(),          // scan the Trash…
+            path: trash_path.clone(),
             icon: icon.to_string(),
             exists: trash_exists,
             is_trash: true,
-            filter_prefix: Some(folder_path.display().to_string()), // …for files from this folder
+            filter_prefix: None, // no prefix filter — show all Trash files
             hint: format!(
-                "Find files deleted from {} that are still in your Trash.",
-                folder_path.display()
+                "Shows all files currently in your Trash. macOS does not record \
+                 which folder files came from, so all Trash items are shown."
             ),
         });
     }

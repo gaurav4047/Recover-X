@@ -57,8 +57,11 @@ export function ResultsScreen() {
   useEffect(() => {
     if (!sessionId) {
       api.listSessions().then((sessions) => {
-        const completed = sessions.find((s) => s.status === "completed");
-        if (completed) setSessionId(completed.id);
+        const completed = sessions.filter((s) => s.status === "completed" && Number(s.files_found) > 0);
+        if (completed.length === 1) {
+          setSessionId(completed[0].id);
+        }
+        // If multiple completed sessions, show the picker (sessionId stays null)
       }).catch(() => {});
     }
   }, []);

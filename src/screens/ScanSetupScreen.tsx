@@ -205,7 +205,7 @@ export function ScanSetupScreen() {
           )}
         </div>
 
-        {/* Folder shortcuts — search Trash for files deleted FROM these folders */}
+        {/* Folder shortcuts — all scan Trash */}
         {!loading && folderLocations.length > 0 && (
           <div style={{ marginBottom: "18px" }}>
             <p style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
@@ -239,9 +239,14 @@ export function ScanSetupScreen() {
                 </button>
               ))}
             </div>
-            <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "8px" }}>
-              Searches your Trash for files that were originally in the selected folder.
-            </p>
+            <div className="alert alert-warning" style={{ marginTop: "10px", padding: "8px 12px" }}>
+              <strong>Note:</strong> These buttons all scan your <strong>Trash</strong> and show files
+              that are still there waiting to be permanently deleted. macOS does not record which
+              folder files originally came from, so all Trash items are shown.
+              <br />
+              <strong>For files already emptied from Trash</strong> (permanently deleted), select a
+              storage device below — raw disk scanning is required.
+            </div>
           </div>
         )}
 
@@ -284,8 +289,11 @@ export function ScanSetupScreen() {
         {/* Physical devices */}
         {devices.length > 0 && (
           <div style={{ marginBottom: "16px" }}>
-            <p style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              Storage devices — raw deleted file recovery
+            <p style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginBottom: "6px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              Storage devices — recover permanently deleted files
+            </p>
+            <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginBottom: "10px" }}>
+              For files deleted and emptied from Trash. Requires Full Disk Access.
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
               {devices.map((dev) => (
@@ -295,23 +303,34 @@ export function ScanSetupScreen() {
                   style={{
                     padding: "10px 14px",
                     background: sourcePath === dev.path && !filterPrefix ? "var(--accent-blue)" : "var(--bg-primary)",
-                    border: `1px solid ${sourcePath === dev.path && !filterPrefix ? "var(--accent-blue)" : "var(--border)"}`,
+                    border: `1px solid ${sourcePath === dev.path && !filterPrefix ? "var(--accent-blue)" : dev.is_accessible ? "var(--border)" : "var(--accent-red)44"}`,
                     borderRadius: "8px",
                     color: sourcePath === dev.path && !filterPrefix ? "#fff" : dev.is_accessible ? "var(--text-primary)" : "var(--text-muted)",
                     cursor: dev.is_accessible ? "pointer" : "not-allowed",
                     display: "flex",
                     alignItems: "center",
                     gap: "12px",
-                    opacity: dev.is_accessible ? 1 : 0.5,
+                    opacity: dev.is_accessible ? 1 : 0.65,
                     textAlign: "left",
                   }}
                 >
                   <span style={{ fontSize: "1.25rem" }}>{dev.is_internal ? "🖥️" : "🔌"}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: "0.875rem" }}>{dev.name}</div>
+                    <div style={{ fontWeight: 600, fontSize: "0.875rem", display: "flex", alignItems: "center", gap: "8px" }}>
+                      {dev.name}
+                      {!dev.is_accessible && (
+                        <span style={{ fontSize: "0.7rem", padding: "1px 6px", borderRadius: "4px", background: "#991b1b", color: "#fecaca" }}>
+                          Needs Full Disk Access
+                        </span>
+                      )}
+                    </div>
                     <div style={{ fontSize: "0.75rem", opacity: 0.8 }}>
                       {dev.path} · {formatBytes(dev.size_bytes)}
-                      {!dev.is_accessible && " · Grant Full Disk Access to enable"}
+                      {!dev.is_accessible && (
+                        <span style={{ color: "var(--accent-amber)" }}>
+                          {" "}— Go to System Settings → Privacy & Security → Full Disk Access → add RecoverX
+                        </span>
+                      )}
                     </div>
                   </div>
                   <span style={{

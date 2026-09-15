@@ -43,8 +43,14 @@ export function DevicesScreen() {
 
       {!response?.error && (
         <div className="alert alert-info" style={{ marginBottom: "20px" }}>
-          Raw device access requires elevated privileges (run with <code>sudo</code> on macOS/Linux,
-          or as Administrator on Windows) to read physical disks.
+          Raw device access requires <strong>Full Disk Access</strong> permission.
+          {" "}<strong>To grant it:</strong> run this in Terminal →{" "}
+          <code style={{ userSelect: "all" }}>
+            open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+          </code>
+          {" "}then add{" "}
+          <code style={{ userSelect: "all" }}>/Users/gauravgavali/recoverx/target/debug/recoverx</code>
+          {" "}and toggle it ON. Then restart with <code>sudo npm run tauri dev</code>.
         </div>
       )}
 
