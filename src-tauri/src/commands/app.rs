@@ -51,8 +51,8 @@ pub fn get_common_locations() -> Vec<CommonLocation> {
         ("Documents", "📄", home.join("Documents")),
         ("Desktop",   "🖥️", home.join("Desktop")),
         ("Pictures",  "🖼️", home.join("Pictures")),
-        ("Movies",    "🎬", home.join("Movies")),
-        ("Music",     "🎵", home.join("Music")),
+        ("Videos",    "🎬", home.join("Movies")),
+        ("Audio",     "🎵", home.join("Music")),
     ];
 
     for (label, icon, folder_path) in folders {
