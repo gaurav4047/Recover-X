@@ -29,3 +29,4 @@ pnpm-debug.log*
 
 # Tauri generated (optional — keep schemas but exclude large gen files)
 src-tauri/gen/schemas/*.json
+src-tauri/'*
