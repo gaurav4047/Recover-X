@@ -87,13 +87,24 @@ pub fn get_common_locations() -> Vec<CommonLocation> {
     #[cfg(target_os = "macos")]
     {
         let trash = home.join(".Trash");
+        // "Recently Deleted" uses mdfind on the whole home dir
         locations.push(CommonLocation {
-            label: "Trash".to_string(),
-            path: trash.display().to_string(),
+            label: "Recently Deleted".to_string(),
+            path: home.display().to_string(),
             icon: "🗑️".to_string(),
-            exists: trash.exists(),
+            exists: home.exists(),
             is_trash: true,
         });
+        // Also expose the Trash folder directly
+        if trash.exists() {
+            locations.push(CommonLocation {
+                label: "Trash".to_string(),
+                path: trash.display().to_string(),
+                icon: "🗑️".to_string(),
+                exists: true,
+                is_trash: true,
+            });
+        }
     }
 
     #[cfg(target_os = "linux")]

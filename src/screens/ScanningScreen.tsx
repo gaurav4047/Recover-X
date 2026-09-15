@@ -89,7 +89,16 @@ export function ScanningScreen() {
     if (session.status === "created") {
       startScan();
     } else if (session.status === "running") {
-      setScanning(true);
+      // Session was running — may be a stuck session from a crash.
+      // Try to restart it by calling start_scan (orchestrator will reset it).
+      startScan();
+    } else if (session.status === "completed") {
+      // Already done — show results immediately
+      setProgress(100);
+      setCurrentStage("Complete");
+      setFilesFound(Number(session.files_found));
+      setProcessedBytes(Number(session.processed_bytes));
+      setTotalBytes(Number(session.source_size_bytes));
     }
   }, []);
 

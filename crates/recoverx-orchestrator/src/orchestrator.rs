@@ -142,13 +142,26 @@ impl RecoveryOrchestrator {
 
         match session.status {
             SessionStatus::Running => {
-                return Err(RecoverXError::ScanAlreadyRunning {
-                    session_id: session_id.to_string(),
-                });
+                // A Running session means the app crashed mid-scan.
+                // Reset it to Created so we can restart cleanly.
+                tracing::warn!(session_id = %session_id, "Resetting stuck Running session");
+                session.status = recoverx_core::types::SessionStatus::Created;
+                self.persist_session(&session)?;
             }
-            SessionStatus::Completed | SessionStatus::Cancelled => {
+            SessionStatus::Completed => {
+                // Allow re-scan of a completed session (user wants a fresh run)
+                tracing::info!(session_id = %session_id, "Re-scanning completed session");
+                session.status = recoverx_core::types::SessionStatus::Created;
+                session.files_found = 0;
+                session.processed_bytes = 0;
+                session.last_offset = 0;
+                session.bad_sectors = 0;
+                session.last_error = None;
+                self.persist_session(&session)?;
+            }
+            SessionStatus::Cancelled => {
                 return Err(RecoverXError::Other(
-                    "Session is already completed or cancelled".to_string(),
+                    "Session was cancelled. Create a new session to scan again.".to_string(),
                 ));
             }
             _ => {}
