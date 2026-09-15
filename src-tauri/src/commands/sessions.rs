@@ -23,6 +23,7 @@ pub struct CreateSessionRequest {
     pub deleted_after: Option<i64>,
     /// Unix timestamp seconds — only recover files deleted before this time.
     pub deleted_before: Option<i64>,
+    pub filter_prefix: Option<String>,
 }
 
 /// Create a new scan session.
@@ -48,6 +49,7 @@ pub async fn create_session(
         file_categories: vec![],
         deleted_after: request.deleted_after,
         deleted_before: request.deleted_before,
+        filter_prefix: request.filter_prefix,
     };
 
     let identity = SourceIdentity {

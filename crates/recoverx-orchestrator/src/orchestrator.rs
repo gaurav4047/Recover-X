@@ -902,6 +902,23 @@ impl RecoveryOrchestrator {
         // Apply timeline filter from scan configuration
         let deleted_after = session.configuration.deleted_after;
         let deleted_before = session.configuration.deleted_before;
+        let filter_prefix = session.configuration.filter_prefix.clone();
+
+        // Apply folder prefix filter (e.g. only show files deleted FROM ~/Downloads)
+        if let Some(ref prefix) = filter_prefix {
+            all_files.retain(|f| {
+                f.original_path
+                    .as_deref()
+                    .map(|p| p.starts_with(prefix.as_str()))
+                    .unwrap_or(false)
+            });
+            tracing::info!(
+                session_id = %session.id,
+                prefix = %prefix,
+                after_filter = all_files.len(),
+                "Prefix filter applied"
+            );
+        }
 
         if deleted_after.is_some() || deleted_before.is_some() {
             all_files.retain(|f| {

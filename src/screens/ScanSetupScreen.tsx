@@ -63,18 +63,24 @@ export function ScanSetupScreen() {
   const location = useLocation();
   const locState = (location.state as LocationState) ?? {};
 
-  const [trashLocations, setTrashLocations] = useState<CommonLocation[]>([]);
+  const [locations, setLocations] = useState<CommonLocation[]>([]);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Selected source
   const [sourcePath, setSourcePath] = useState(locState.device?.path ?? "");
   const [sourceLabel, setSourceLabel] = useState(locState.device?.name ?? "");
   const [sourceDevice, setSourceDevice] = useState<DeviceInfo | null>(locState.device ?? null);
-  const [loadingLocations, setLoadingLocations] = useState(true);
+  const [filterPrefix, setFilterPrefix] = useState<string | null>(null);
+  const [manualPath, setManualPath] = useState("");
 
-  const [presetDays, setPresetDays] = useState<number>(30);
+  // Timeline
+  const [presetDays, setPresetDays] = useState(30);
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [useCustom, setUseCustom] = useState(false);
 
+  // Mode
   const [mode, setMode] = useState<string>(locState.mode ?? "quick");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,9 +90,9 @@ export function ScanSetupScreen() {
       api.getCommonLocations().catch(() => [] as CommonLocation[]),
       api.listDevices().catch(() => ({ devices: [] as DeviceInfo[], error: null })),
     ]).then(([locs, devRes]) => {
-      setTrashLocations(locs.filter((l) => l.is_trash));
+      setLocations(locs);
       setDevices(devRes.devices ?? []);
-      setLoadingLocations(false);
+      setLoading(false);
     });
   }, []);
 
@@ -103,25 +109,49 @@ export function ScanSetupScreen() {
 
   const selectedMode = MODES.find((m) => m.id === mode) ?? MODES[0];
 
-  const isTrashSource = trashLocations.some((l) => l.path === sourcePath);
+  const selectLocation = (loc: CommonLocation) => {
+    setSourcePath(loc.path);
+    setSourceLabel(loc.label);
+    setSourceDevice(null);
+    setFilterPrefix(loc.filter_prefix);
+    setManualPath("");
+  };
+
+  const selectDevice = (dev: DeviceInfo) => {
+    if (!dev.is_accessible) return;
+    setSourcePath(dev.path);
+    setSourceLabel(dev.name);
+    setSourceDevice(dev);
+    setFilterPrefix(null);
+    setManualPath("");
+  };
+
+  const handleManualChange = (val: string) => {
+    setManualPath(val);
+    setSourcePath(val);
+    setSourceLabel("");
+    setSourceDevice(null);
+    setFilterPrefix(null);
+  };
 
   const handleStart = async () => {
-    if (!sourcePath.trim()) {
-      setError("Please select a source.");
-      return;
-    }
+    const path = sourcePath.trim() || manualPath.trim();
+    if (!path) { setError("Please select a source."); return; }
+
     setCreating(true);
     setError(null);
     const { after, before } = timelineTimestamps();
+
     try {
       const req: CreateSessionRequest = {
-        source_path: sourcePath.trim(),
+        source_path: path,
         source_size_bytes: sourceDevice?.size_bytes ?? 0,
         sector_size: sourceDevice?.sector_size ?? 512,
         scan_mode: mode,
         ...selectedMode.config,
         deleted_after: after,
         deleted_before: before,
+        filter_prefix: filterPrefix,
       };
       const session = await api.createSession(req);
       navigate("/scanning", { state: { session } });
@@ -142,6 +172,13 @@ export function ScanSetupScreen() {
     return TIMELINE_PRESETS.find((p) => p.days === presetDays)?.label ?? "All time";
   };
 
+  // Group locations: folder shortcuts vs. trash/all
+  const folderLocations = locations.filter((l) => l.filter_prefix !== null);
+  const trashLocations  = locations.filter((l) => l.filter_prefix === null);
+
+  const isSelected = (loc: CommonLocation) =>
+    sourcePath === loc.path && filterPrefix === loc.filter_prefix;
+
   return (
     <div style={{ padding: "24px", height: "100%", overflow: "auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "24px" }}>
@@ -149,7 +186,7 @@ export function ScanSetupScreen() {
         <div>
           <h2>Scan Setup</h2>
           <p style={{ color: "var(--text-secondary)", fontSize: "0.8125rem", marginTop: "2px" }}>
-            Select what to scan, set a time window, then start.
+            Choose what to scan, set a time window, then start recovering.
           </p>
         </div>
       </div>
@@ -163,30 +200,72 @@ export function ScanSetupScreen() {
           {sourcePath && (
             <span style={{ fontSize: "0.8125rem", color: "var(--accent-green)" }}>
               ✓ {sourceLabel || sourcePath}
+              {filterPrefix && <span style={{ color: "var(--text-muted)" }}> (deleted from {filterPrefix.split("/").pop()})</span>}
             </span>
           )}
         </div>
 
-        {/* Trash locations */}
-        {!loadingLocations && trashLocations.length > 0 && (
-          <div style={{ marginBottom: "16px" }}>
-            <p style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              Trash — files you deleted
+        {/* Folder shortcuts — search Trash for files deleted FROM these folders */}
+        {!loading && folderLocations.length > 0 && (
+          <div style={{ marginBottom: "18px" }}>
+            <p style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              Find deleted files from…
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px" }}>
+              {folderLocations.map((loc) => (
+                <button
+                  key={loc.label}
+                  onClick={() => selectLocation(loc)}
+                  disabled={!loc.exists}
+                  title={loc.hint}
+                  style={{
+                    padding: "14px 10px",
+                    background: isSelected(loc) ? "var(--accent-blue)" : "var(--bg-primary)",
+                    border: `1px solid ${isSelected(loc) ? "var(--accent-blue)" : "var(--border)"}`,
+                    borderRadius: "10px",
+                    color: isSelected(loc) ? "#fff" : loc.exists ? "var(--text-primary)" : "var(--text-muted)",
+                    cursor: loc.exists ? "pointer" : "not-allowed",
+                    opacity: loc.exists ? 1 : 0.45,
+                    textAlign: "center",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: "6px",
+                    transition: "all 0.12s",
+                  }}
+                >
+                  <span style={{ fontSize: "1.75rem" }}>{loc.icon}</span>
+                  <span style={{ fontSize: "0.8125rem", fontWeight: 600 }}>{loc.label}</span>
+                </button>
+              ))}
+            </div>
+            <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "8px" }}>
+              Searches your Trash for files that were originally in the selected folder.
+            </p>
+          </div>
+        )}
+
+        {/* Trash / whole-trash options */}
+        {!loading && trashLocations.length > 0 && (
+          <div style={{ marginBottom: "18px" }}>
+            <p style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              All Trash
             </p>
             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
               {trashLocations.map((loc) => (
                 <button
-                  key={loc.path}
-                  onClick={() => { setSourcePath(loc.path); setSourceLabel(loc.label); setSourceDevice(null); }}
+                  key={loc.label + loc.path}
+                  onClick={() => selectLocation(loc)}
                   disabled={!loc.exists}
+                  title={loc.hint}
                   style={{
-                    padding: "12px 16px",
-                    background: sourcePath === loc.path ? "var(--accent-blue)" : "var(--bg-primary)",
-                    border: `1px solid ${sourcePath === loc.path ? "var(--accent-blue)" : "var(--border)"}`,
+                    padding: "10px 16px",
+                    background: isSelected(loc) ? "var(--accent-blue)" : "var(--bg-primary)",
+                    border: `1px solid ${isSelected(loc) ? "var(--accent-blue)" : "var(--border)"}`,
                     borderRadius: "8px",
-                    color: sourcePath === loc.path ? "#fff" : loc.exists ? "var(--text-primary)" : "var(--text-muted)",
+                    color: isSelected(loc) ? "#fff" : loc.exists ? "var(--text-primary)" : "var(--text-muted)",
                     cursor: loc.exists ? "pointer" : "not-allowed",
-                    opacity: loc.exists ? 1 : 0.5,
+                    opacity: loc.exists ? 1 : 0.45,
                     display: "flex",
                     alignItems: "center",
                     gap: "8px",
@@ -194,36 +273,31 @@ export function ScanSetupScreen() {
                     fontWeight: 600,
                   }}
                 >
-                  <span style={{ fontSize: "1.25rem" }}>{loc.icon}</span>
+                  <span style={{ fontSize: "1.2rem" }}>{loc.icon}</span>
                   {loc.label}
                 </button>
               ))}
             </div>
-            {sourcePath && isTrashSource && (
-              <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "8px" }}>
-                Scans files currently in your Trash that haven't been permanently deleted yet.
-              </p>
-            )}
           </div>
         )}
 
         {/* Physical devices */}
         {devices.length > 0 && (
           <div style={{ marginBottom: "16px" }}>
-            <p style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              Storage Devices — raw deleted file recovery
+            <p style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              Storage devices — raw deleted file recovery
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
               {devices.map((dev) => (
                 <button
                   key={dev.path}
-                  onClick={() => { if (dev.is_accessible) { setSourcePath(dev.path); setSourceLabel(dev.name); setSourceDevice(dev); }}}
+                  onClick={() => selectDevice(dev)}
                   style={{
                     padding: "10px 14px",
-                    background: sourcePath === dev.path ? "var(--accent-blue)" : "var(--bg-primary)",
-                    border: `1px solid ${sourcePath === dev.path ? "var(--accent-blue)" : "var(--border)"}`,
+                    background: sourcePath === dev.path && !filterPrefix ? "var(--accent-blue)" : "var(--bg-primary)",
+                    border: `1px solid ${sourcePath === dev.path && !filterPrefix ? "var(--accent-blue)" : "var(--border)"}`,
                     borderRadius: "8px",
-                    color: sourcePath === dev.path ? "#fff" : dev.is_accessible ? "var(--text-primary)" : "var(--text-muted)",
+                    color: sourcePath === dev.path && !filterPrefix ? "#fff" : dev.is_accessible ? "var(--text-primary)" : "var(--text-muted)",
                     cursor: dev.is_accessible ? "pointer" : "not-allowed",
                     display: "flex",
                     alignItems: "center",
@@ -240,7 +314,11 @@ export function ScanSetupScreen() {
                       {!dev.is_accessible && " · Grant Full Disk Access to enable"}
                     </div>
                   </div>
-                  <span style={{ fontSize: "0.65rem", padding: "2px 6px", borderRadius: "4px", background: dev.is_internal ? "#1d4ed855" : "#92400e55", color: dev.is_internal ? "#bfdbfe" : "#fde68a", flexShrink: 0 }}>
+                  <span style={{
+                    fontSize: "0.65rem", padding: "2px 6px", borderRadius: "4px",
+                    background: dev.is_internal ? "#1d4ed855" : "#92400e55",
+                    color: dev.is_internal ? "#bfdbfe" : "#fde68a", flexShrink: 0,
+                  }}>
                     {dev.is_internal ? "INTERNAL" : "EXTERNAL"}
                   </span>
                 </button>
@@ -249,78 +327,74 @@ export function ScanSetupScreen() {
           </div>
         )}
 
-        {/* Disk image manual path */}
+        {/* Manual path */}
         <div>
           <p style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginBottom: "6px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-            Disk image file (.img / .dd / .raw)
+            Or enter a disk image path manually
           </p>
           <input
             className="form-input mono"
             type="text"
-            value={!isTrashSource && !sourceDevice ? sourcePath : ""}
-            onChange={(e) => { setSourcePath(e.target.value); setSourceLabel(""); setSourceDevice(null); }}
-            placeholder="/path/to/backup.img"
+            value={manualPath}
+            onChange={(e) => handleManualChange(e.target.value)}
+            placeholder="/path/to/backup.img  or  /dev/disk2"
           />
         </div>
       </div>
 
-      {/* ── STEP 2: Timeline (only relevant for device/image scans) ── */}
-      {!isTrashSource && (
-        <div className="card" style={{ marginBottom: "16px" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
-            <h3>② Timeline</h3>
-            <span style={{ fontSize: "0.8125rem", color: "var(--accent-green)" }}>{timelineSummary()}</span>
-          </div>
-          <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", marginBottom: "12px" }}>
-            Only show files deleted within this time window. Files with no timestamp are always included.
-          </p>
-          {!useCustom && (
-            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" }}>
-              {TIMELINE_PRESETS.map((p) => (
-                <button
-                  key={p.days}
-                  onClick={() => setPresetDays(p.days)}
-                  style={{
-                    padding: "6px 14px",
-                    background: presetDays === p.days ? "var(--accent-blue)" : "var(--bg-primary)",
-                    border: `1px solid ${presetDays === p.days ? "var(--accent-blue)" : "var(--border)"}`,
-                    borderRadius: "20px",
-                    color: presetDays === p.days ? "#fff" : "var(--text-secondary)",
-                    cursor: "pointer",
-                    fontSize: "0.8125rem",
-                    fontWeight: presetDays === p.days ? 600 : 400,
-                  }}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          )}
-          <button
-            onClick={() => setUseCustom((v) => !v)}
-            style={{ background: "none", border: "none", color: "var(--accent-blue)", cursor: "pointer", fontSize: "0.8125rem", padding: 0 }}
-          >
-            {useCustom ? "▲ Use preset" : "▼ Custom date range"}
-          </button>
-          {useCustom && (
-            <div style={{ display: "flex", gap: "12px", marginTop: "12px" }}>
-              <div style={{ flex: 1 }}>
-                <label className="form-label">Deleted after</label>
-                <input className="form-input" type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
-              </div>
-              <span style={{ color: "var(--text-muted)", marginTop: "22px" }}>→</span>
-              <div style={{ flex: 1 }}>
-                <label className="form-label">Deleted before</label>
-                <input className="form-input" type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} />
-              </div>
-            </div>
-          )}
+      {/* ── STEP 2: Timeline ── */}
+      <div className="card" style={{ marginBottom: "16px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+          <h3>② Timeline</h3>
+          <span style={{ fontSize: "0.8125rem", color: "var(--accent-green)" }}>{timelineSummary()}</span>
         </div>
-      )}
+        <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", marginBottom: "12px" }}>
+          Only show files deleted within this window. Files with no timestamp are always included.
+        </p>
+        {!useCustom && (
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" }}>
+            {TIMELINE_PRESETS.map((p) => (
+              <button
+                key={p.days}
+                onClick={() => setPresetDays(p.days)}
+                style={{
+                  padding: "6px 14px",
+                  background: presetDays === p.days ? "var(--accent-blue)" : "var(--bg-primary)",
+                  border: `1px solid ${presetDays === p.days ? "var(--accent-blue)" : "var(--border)"}`,
+                  borderRadius: "20px",
+                  color: presetDays === p.days ? "#fff" : "var(--text-secondary)",
+                  cursor: "pointer",
+                  fontSize: "0.8125rem",
+                  fontWeight: presetDays === p.days ? 600 : 400,
+                }}
+              >{p.label}</button>
+            ))}
+          </div>
+        )}
+        <button
+          onClick={() => setUseCustom((v) => !v)}
+          style={{ background: "none", border: "none", color: "var(--accent-blue)", cursor: "pointer", fontSize: "0.8125rem", padding: 0 }}
+        >
+          {useCustom ? "▲ Use preset" : "▼ Custom date range"}
+        </button>
+        {useCustom && (
+          <div style={{ display: "flex", gap: "12px", marginTop: "12px" }}>
+            <div style={{ flex: 1 }}>
+              <label className="form-label">Deleted after</label>
+              <input className="form-input" type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
+            </div>
+            <span style={{ color: "var(--text-muted)", marginTop: "22px" }}>→</span>
+            <div style={{ flex: 1 }}>
+              <label className="form-label">Deleted before</label>
+              <input className="form-input" type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} />
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* ── STEP 3: Scan Mode ── */}
       <div className="card" style={{ marginBottom: "24px" }}>
-        <h3 style={{ marginBottom: "14px" }}>{isTrashSource ? "②" : "③"} Scan Mode</h3>
+        <h3 style={{ marginBottom: "14px" }}>③ Scan Mode</h3>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px", marginBottom: "10px" }}>
           {MODES.map((m) => (
             <button
@@ -354,23 +428,22 @@ export function ScanSetupScreen() {
         <button
           className="btn btn-primary btn-lg"
           onClick={handleStart}
-          disabled={creating || !sourcePath.trim()}
+          disabled={creating || (!sourcePath.trim() && !manualPath.trim())}
         >
           {creating ? "Starting…" : `▶ Start ${selectedMode.label}`}
         </button>
         <button className="btn btn-ghost btn-lg" onClick={() => navigate(-1)}>Cancel</button>
-        {sourcePath && (
+        {(sourcePath || manualPath) && (
           <span style={{ fontSize: "0.8125rem", color: "var(--text-muted)", marginLeft: "auto" }}>
-            {sourceLabel || sourcePath}
-            {!isTrashSource && ` · ${timelineSummary()}`}
-            {` · ${selectedMode.label}`}
+            {sourceLabel || sourcePath || manualPath} · {timelineSummary()} · {selectedMode.label}
           </span>
         )}
       </div>
 
       <div className="alert alert-info" style={{ marginTop: "20px" }}>
-        <strong>Note:</strong> RecoverX never modifies the source. All reads are strictly read-only.
-        {!isTrashSource && " For best results on internal SSDs, grant Full Disk Access in System Settings → Privacy & Security."}
+        <strong>Note:</strong> RecoverX only shows files that are genuinely deleted — either in your Trash,
+        or detected as deleted entries on the raw storage device.
+        It never lists currently-existing files as "recoverable".
       </div>
     </div>
   );

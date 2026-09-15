@@ -97,6 +97,8 @@ pub struct ScanConfiguration {
     pub deleted_after: Option<i64>,
     /// Only return files deleted on or before this Unix timestamp (seconds). None = no filter.
     pub deleted_before: Option<i64>,
+    /// Only return files whose original path starts with this prefix (e.g. ~/Downloads).
+    pub filter_prefix: Option<String>,
 }
 
 impl ScanConfiguration {
@@ -111,6 +113,7 @@ impl ScanConfiguration {
             file_categories: vec![],
             deleted_after: None,
             deleted_before: None,
+            filter_prefix: None,
         }
     }
 
@@ -125,6 +128,7 @@ impl ScanConfiguration {
             file_categories: vec![],
             deleted_after: None,
             deleted_before: None,
+            filter_prefix: None,
         }
     }
 
@@ -139,6 +143,7 @@ impl ScanConfiguration {
             file_categories: vec![],
             deleted_after: None,
             deleted_before: None,
+            filter_prefix: None,
         }
     }
 

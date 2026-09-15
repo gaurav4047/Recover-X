@@ -96,6 +96,7 @@ export interface CreateSessionRequest {
   enable_forensic_hashing: boolean;
   deleted_after: number | null;
   deleted_before: number | null;
+  filter_prefix: string | null;
 }
 
 export interface CommonLocation {
@@ -104,6 +105,8 @@ export interface CommonLocation {
   icon: string;
   exists: boolean;
   is_trash: boolean;
+  filter_prefix: string | null;
+  hint: string;
 }
 
 export interface RecoveredFile {
