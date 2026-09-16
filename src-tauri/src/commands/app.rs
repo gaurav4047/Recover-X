@@ -19,86 +19,82 @@ pub fn get_app_info() -> AppInfo {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CommonLocation {
     pub label: String,
-    /// The path to scan (device path, Trash path, or folder path)
     pub path: String,
     pub icon: String,
     pub exists: bool,
     pub is_trash: bool,
-    /// For folder locations: the original folder whose deleted files we want.
-    /// The scanner will search the Trash for files that came from this folder.
-    pub filter_prefix: Option<String>,
-    pub hint: String,
 }
 
-/// Return all scan source locations.
+/// Return the standard user directories on this system.
 #[tauri::command]
 pub fn get_common_locations() -> Vec<CommonLocation> {
     let home = dirs_next::home_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("/"));
 
-    let trash = home.join(".Trash");
-    let trash_path = trash.display().to_string();
-    let trash_exists = trash.exists();
-
-    let mut locations = Vec::new();
-
-    // ── User folder shortcuts ─────────────────────────────────────────────
-    // These show files deleted FROM that folder (found in Trash with matching origin).
-    // Source path = Trash; filter_prefix = the folder.
-
-    let folders = vec![
-        ("Downloads", "⬇️", home.join("Downloads")),
-        ("Documents", "📄", home.join("Documents")),
-        ("Desktop",   "🖥️", home.join("Desktop")),
-        ("Pictures",  "🖼️", home.join("Pictures")),
-        ("Videos",    "🎬", home.join("Movies")),
-        ("Audio",     "🎵", home.join("Music")),
+    let mut locations = vec![
+        CommonLocation {
+            label: "Downloads".to_string(),
+            path: home.join("Downloads").display().to_string(),
+            icon: "⬇️".to_string(),
+            exists: home.join("Downloads").exists(),
+            is_trash: false,
+        },
+        CommonLocation {
+            label: "Documents".to_string(),
+            path: home.join("Documents").display().to_string(),
+            icon: "📄".to_string(),
+            exists: home.join("Documents").exists(),
+            is_trash: false,
+        },
+        CommonLocation {
+            label: "Desktop".to_string(),
+            path: home.join("Desktop").display().to_string(),
+            icon: "🖥️".to_string(),
+            exists: home.join("Desktop").exists(),
+            is_trash: false,
+        },
+        CommonLocation {
+            label: "Pictures".to_string(),
+            path: home.join("Pictures").display().to_string(),
+            icon: "🖼️".to_string(),
+            exists: home.join("Pictures").exists(),
+            is_trash: false,
+        },
+        CommonLocation {
+            label: "Movies".to_string(),
+            path: home.join("Movies").display().to_string(),
+            icon: "🎬".to_string(),
+            exists: home.join("Movies").exists(),
+            is_trash: false,
+        },
+        CommonLocation {
+            label: "Music".to_string(),
+            path: home.join("Music").display().to_string(),
+            icon: "🎵".to_string(),
+            exists: home.join("Music").exists(),
+            is_trash: false,
+        },
+        CommonLocation {
+            label: "Home".to_string(),
+            path: home.display().to_string(),
+            icon: "🏠".to_string(),
+            exists: home.exists(),
+            is_trash: false,
+        },
     ];
 
-    for (label, icon, _folder_path) in folders {
-        // macOS does not record original folder in ~/.Trash metadata,
-        // so we scan all Trash files and show them regardless of origin.
-        locations.push(CommonLocation {
-            label: label.to_string(),
-            path: trash_path.clone(),
-            icon: icon.to_string(),
-            exists: trash_exists,
-            is_trash: true,
-            filter_prefix: None, // no prefix filter — show all Trash files
-            hint: format!(
-                "Shows all files currently in your Trash. macOS does not record \
-                 which folder files came from, so all Trash items are shown."
-            ),
-        });
-    }
-
-    // ── Trash (all deleted files, no folder filter) ───────────────────────
-    locations.push(CommonLocation {
-        label: "All Trash".to_string(),
-        path: trash_path.clone(),
-        icon: "🗑️".to_string(),
-        exists: trash_exists,
-        is_trash: true,
-        filter_prefix: None,
-        hint: "All files currently in your Trash, regardless of origin.".to_string(),
-    });
-
-    // ── External volume Trashes ───────────────────────────────────────────
+    // Trash locations (platform-specific)
     #[cfg(target_os = "macos")]
-    if let Ok(vols) = std::fs::read_dir("/Volumes") {
-        for entry in vols.flatten() {
-            let trashes = entry.path().join(".Trashes");
-            if trashes.exists() {
-                locations.push(CommonLocation {
-                    label: format!("{} Trash", entry.file_name().to_string_lossy()),
-                    path: trashes.display().to_string(),
-                    icon: "💾".to_string(),
-                    exists: true,
-                    is_trash: true,
-                    filter_prefix: None,
-                    hint: "Deleted files from this external volume.".to_string(),
-                });
-            }
+    {
+        let trash = home.join(".Trash");
+        if trash.exists() {
+            locations.push(CommonLocation {
+                label: "Trash".to_string(),
+                path: trash.display().to_string(),
+                icon: "🗑️".to_string(),
+                exists: true,
+                is_trash: true,
+            });
         }
     }
 
@@ -111,8 +107,6 @@ pub fn get_common_locations() -> Vec<CommonLocation> {
             icon: "🗑️".to_string(),
             exists: trash.exists(),
             is_trash: true,
-            filter_prefix: None,
-            hint: "Files in the system Trash.".to_string(),
         });
     }
 
@@ -124,8 +118,6 @@ pub fn get_common_locations() -> Vec<CommonLocation> {
             icon: "🗑️".to_string(),
             exists: std::path::Path::new("C:\\$Recycle.Bin").exists(),
             is_trash: true,
-            filter_prefix: None,
-            hint: "Files in the Windows Recycle Bin.".to_string(),
         });
     }
 

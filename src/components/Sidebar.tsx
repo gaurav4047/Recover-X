@@ -7,7 +7,6 @@ const navItems = [
   { to: "/results", label: "Results", icon: "📋" },
   { to: "/recovery", label: "Recovery", icon: "↗️" },
   { to: "/sessions", label: "Sessions", icon: "🗂️" },
-  { to: "/settings", label: "Settings", icon: "⚙️" },
 ];
 
 export function Sidebar() {

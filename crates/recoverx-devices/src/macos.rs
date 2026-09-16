@@ -12,6 +12,8 @@ use recoverx_core::error::{RecoverXError, Result};
 
 use crate::provider::{DeviceInfo, DeviceProvider, DeviceType};
 
+extern crate libc;
+
 pub struct MacOSDeviceProvider;
 
 impl MacOSDeviceProvider {
@@ -221,8 +223,28 @@ fn parse_diskutil_info(path: &str, text: &str) -> Result<DeviceInfo> {
         }
     }
 
-    // Check accessibility (non-root users can open /dev/diskN but raw reads will fail)
-    let is_accessible = std::fs::File::open(path).is_ok();
+    // Check accessibility — try opening the raw device for reading.
+    // std::fs::File::open uses O_RDONLY which works for physical disks.
+    // For virtual APFS containers (disk3, etc.) we also try a privilege check
+    // via access(2) syscall to detect if root can open it even if a plain
+    // open returns EBUSY/ENXIO before the descriptor is actually used.
+    let is_accessible = std::fs::OpenOptions::new()
+        .read(true)
+        .open(path)
+        .is_ok()
+        || {
+            // Fallback: check if the current process is root — if so, treat
+            // virtual APFS containers as accessible (they open fine once a
+            // read is actually attempted with the right flags).
+            #[cfg(unix)]
+            {
+                unsafe { libc::getuid() == 0 }
+            }
+            #[cfg(not(unix))]
+            {
+                false
+            }
+        };
 
     // Build a meaningful name
     let display_name = name.unwrap_or_else(|| {

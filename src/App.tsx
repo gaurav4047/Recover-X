@@ -6,7 +6,6 @@ import { ScanSetupScreen } from "./screens/ScanSetupScreen";
 import { ScanningScreen } from "./screens/ScanningScreen";
 import { ResultsScreen } from "./screens/ResultsScreen";
 import { RecoveryScreen } from "./screens/RecoveryScreen";
-import { SettingsScreen } from "./screens/SettingsScreen";
 import { SessionsScreen } from "./screens/SessionsScreen";
 import "./styles.css";
 
@@ -33,7 +32,6 @@ export default function App() {
             <Route path="/scanning" element={<ScanningScreen />} />
             <Route path="/results" element={<ResultsScreen />} />
             <Route path="/recovery" element={<RecoveryScreen />} />
-            <Route path="/settings" element={<SettingsScreen />} />
             <Route path="/sessions" element={<SessionsScreen />} />
           </Routes>
         </main>
