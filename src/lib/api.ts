@@ -208,6 +208,9 @@ export const api = {
   getDeviceInfo: (path: string): Promise<DeviceInfo> =>
     invoke("get_device_info", { path }),
 
+  /** Returns true if Full Disk Access is granted (or not on macOS). */
+  checkFullDiskAccess: (): Promise<boolean> => invoke("check_full_disk_access"),
+
   createSession: (request: CreateSessionRequest): Promise<ScanSession> =>
     invoke("create_session", { request }),
 

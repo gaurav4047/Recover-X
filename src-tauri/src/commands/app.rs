@@ -148,3 +148,24 @@ pub fn get_common_locations() -> Vec<CommonLocation> {
 
     locations
 }
+
+/// Check whether this process has Full Disk Access on macOS.
+///
+/// Attempts to open a protected system path that is only readable with FDA.
+/// On Linux/Windows always returns true (no equivalent permission gate).
+#[tauri::command]
+pub fn check_full_disk_access() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        // /dev/disk0 is only openable (even read-only) when FDA is granted or
+        // the process is running as root.  A plain user without FDA gets EPERM.
+        std::fs::OpenOptions::new()
+            .read(true)
+            .open("/dev/disk0")
+            .is_ok()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}

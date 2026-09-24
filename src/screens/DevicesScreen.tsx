@@ -7,14 +7,20 @@ export function DevicesScreen() {
   const navigate = useNavigate();
   const [response, setResponse] = useState<DeviceListResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hasFullDiskAccess, setHasFullDiskAccess] = useState<boolean | null>(null);
 
   const loadDevices = async () => {
     setLoading(true);
     try {
-      const res = await api.listDevices();
+      const [res, fda] = await Promise.all([
+        api.listDevices(),
+        api.checkFullDiskAccess(),
+      ]);
       setResponse(res);
+      setHasFullDiskAccess(fda);
     } catch (err) {
       setResponse({ devices: [], error: String(err) });
+      setHasFullDiskAccess(false);
     } finally {
       setLoading(false);
     }
@@ -41,7 +47,7 @@ export function DevicesScreen() {
         </button>
       </div>
 
-      {!response?.error && (
+      {hasFullDiskAccess === false && (
         <div className="alert alert-info" style={{ marginBottom: "20px" }}>
           Raw device access requires <strong>Full Disk Access</strong> permission.
           {" "}<strong>To grant it:</strong> run this in Terminal →{" "}

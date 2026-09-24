@@ -55,6 +55,7 @@ pub fn run() {
             commands::app::get_app_info,
             commands::app::get_common_locations,
             commands::app::get_path_size,
+            commands::app::check_full_disk_access,
         ])
         .setup(|app| {
             let data_dir = app
