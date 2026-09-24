@@ -272,6 +272,24 @@ export const api = {
         callback(parsed);
       } catch (_) {}
     }),
+
+  scanForCorruption: (request: ScanCorruptionRequest): Promise<CorruptionReport[]> =>
+    invoke("scan_for_corruption", { request }),
+
+  repairCorruptedFiles: (request: RepairCorruptedRequest): Promise<RepairResult[]> =>
+    invoke("repair_corrupted_files", { request }),
+
+  /** Opens the native macOS folder-picker. Resolves to the chosen path, or null if cancelled. */
+  openFolderDialog: (): Promise<string | null> =>
+    invoke("open_folder_dialog"),
+
+  /** Opens a native file-picker (multi-select). Resolves to array of chosen paths. */
+  openFileDialog: (): Promise<string[]> =>
+    invoke("open_file_dialog"),
+
+  /** Opens a native folder-picker for secure-delete targets. Resolves to path or null. */
+  openTargetFolderDialog: (): Promise<string | null> =>
+    invoke("open_target_folder_dialog"),
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -332,5 +350,67 @@ export function fileIcon(ext: string | null): string {
     case "sqlite": case "db": return "🗄️";
     case "txt": case "csv": case "rtf": return "📃";
     default: return "📄";
+  }
+}
+
+// ── Corrupted Data Recovery types ────────────────────────────────────────────
+
+export type CorruptionKind =
+  | "bad_header"
+  | "bad_footer"
+  | "broken_structure"
+  | "truncated_content"
+  | "zero_padded_tail"
+  | "empty_file"
+  | "healthy"
+  | "unknown";
+
+export interface CorruptionReport {
+  path: string;
+  size_bytes: number;
+  format: string;
+  corruption: CorruptionKind;
+  description: string;
+  repairable: boolean;
+  repair_confidence: number;
+}
+
+export interface RepairResult {
+  original_path: string;
+  repaired_path: string;
+  success: boolean;
+  action: string;
+  bytes_written: number;
+  error: string | null;
+}
+
+export interface ScanCorruptionRequest {
+  paths: string[];
+}
+
+export interface RepairCorruptedRequest {
+  reports: CorruptionReport[];
+  output_dir: string;
+}
+
+export function corruptionKindLabel(kind: CorruptionKind): string {
+  switch (kind) {
+    case "bad_header":        return "Bad Header";
+    case "bad_footer":        return "Missing Footer";
+    case "broken_structure":  return "Broken Structure";
+    case "truncated_content": return "Truncated";
+    case "zero_padded_tail":  return "Zero-Padded Tail";
+    case "empty_file":        return "Empty File";
+    case "healthy":           return "Healthy";
+    default:                  return "Unknown";
+  }
+}
+
+export function corruptionKindColor(kind: CorruptionKind): string {
+  switch (kind) {
+    case "healthy":    return "#22c55e";
+    case "unknown":    return "#6b7280";
+    case "empty_file": return "#6b7280";
+    default:           return "#ef4444";
   }
 }

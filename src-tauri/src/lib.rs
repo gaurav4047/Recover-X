@@ -22,6 +22,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
             // Device commands
@@ -44,9 +45,16 @@ pub fn run() {
             commands::results::list_partitions,
             commands::results::recover_files,
             commands::results::verify_file_hash,
+            // Corrupted data recovery commands
+            commands::results::scan_for_corruption,
+            commands::results::repair_corrupted_files,
+            commands::results::open_folder_dialog,
+            commands::results::open_file_dialog,
+            commands::results::open_target_folder_dialog,
             // Application info
             commands::app::get_app_info,
             commands::app::get_common_locations,
+            commands::app::get_path_size,
         ])
         .setup(|app| {
             let data_dir = app

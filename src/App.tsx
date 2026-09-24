@@ -7,6 +7,8 @@ import { ScanningScreen } from "./screens/ScanningScreen";
 import { ResultsScreen } from "./screens/ResultsScreen";
 import { RecoveryScreen } from "./screens/RecoveryScreen";
 import { SessionsScreen } from "./screens/SessionsScreen";
+import { CorruptionRepairScreen } from "./screens/CorruptionRepairScreen";
+import { SecureDeleteScreen } from "./screens/SecureDeleteScreen";
 import "./styles.css";
 
 export default function App() {
@@ -33,6 +35,8 @@ export default function App() {
             <Route path="/results" element={<ResultsScreen />} />
             <Route path="/recovery" element={<RecoveryScreen />} />
             <Route path="/sessions" element={<SessionsScreen />} />
+            <Route path="/corruption-repair" element={<CorruptionRepairScreen />} />
+            <Route path="/secure-delete" element={<SecureDeleteScreen />} />
           </Routes>
         </main>
       </div>

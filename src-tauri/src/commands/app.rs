@@ -25,6 +25,31 @@ pub struct CommonLocation {
     pub is_trash: bool,
 }
 
+/// Return the disk size (bytes) of a file or directory (recursive for dirs).
+#[tauri::command]
+pub fn get_path_size(path: String) -> Result<u64, String> {
+    fn dir_size(p: &std::path::Path) -> u64 {
+        let mut total = 0u64;
+        if let Ok(entries) = std::fs::read_dir(p) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let child = entry.path();
+                if child.is_file() {
+                    total += child.metadata().map(|m| m.len()).unwrap_or(0);
+                } else if child.is_dir() {
+                    total += dir_size(&child);
+                }
+            }
+        }
+        total
+    }
+
+    let p = std::path::Path::new(&path);
+    if p.is_file() {
+        return p.metadata().map(|m| m.len()).map_err(|e| e.to_string());
+    }
+    Ok(dir_size(p))
+}
+
 /// Return the standard user directories on this system.
 #[tauri::command]
 pub fn get_common_locations() -> Vec<CommonLocation> {

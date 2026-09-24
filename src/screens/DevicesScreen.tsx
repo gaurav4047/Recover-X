@@ -25,7 +25,7 @@ export function DevicesScreen() {
   }, []);
 
   const internal = response?.devices.filter((d) => d.is_internal) ?? [];
-  const external = response?.devices.filter((d) => !d.is_internal && d.device_type !== "optical") ?? [];
+  const external = response?.devices.filter((d) => !d.is_internal && d.device_type !== "optical" && d.device_type !== "virtual") ?? [];
 
   return (
     <div style={{ padding: "24px", height: "100%", overflow: "auto" }}>
@@ -95,9 +95,6 @@ export function DevicesScreen() {
 
           {external.length > 0 && (
             <section>
-              <h3 style={{ marginBottom: "12px", color: "var(--text-secondary)", fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                EXTERNAL / REMOVABLE
-              </h3>
               <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                 {external.map((device) => (
                   <DeviceCard key={device.path} device={device} onScan={(mode) =>
@@ -119,13 +116,6 @@ interface DeviceCardProps {
 }
 
 function DeviceCard({ device, onScan }: DeviceCardProps) {
-  const typeLabel = device.is_internal ? "INTERNAL" :
-    device.device_type === "sd_card" ? "SD CARD" :
-    device.device_type === "removable" ? "REMOVABLE" : "EXTERNAL";
-
-  const typeColor = device.is_internal ? "var(--accent-blue)" :
-    device.device_type === "sd_card" ? "var(--accent-green)" : "var(--accent-amber)";
-
   return (
     <div className="card" style={{ display: "flex", alignItems: "center", gap: "16px" }}>
       <div style={{ fontSize: "2rem", flexShrink: 0 }}>
@@ -135,17 +125,6 @@ function DeviceCard({ device, onScan }: DeviceCardProps) {
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px", flexWrap: "wrap" }}>
-          <span style={{
-            fontSize: "0.65rem",
-            padding: "2px 6px",
-            borderRadius: "4px",
-            background: typeColor + "22",
-            color: typeColor,
-            fontWeight: 700,
-            letterSpacing: "0.05em",
-          }}>
-            {typeLabel}
-          </span>
           <h4 style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {device.name}
           </h4>

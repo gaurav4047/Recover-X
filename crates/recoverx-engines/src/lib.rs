@@ -8,6 +8,7 @@
 //! - Trash/Recycle Bin scanner
 
 pub mod carving;
+pub mod corruption;
 pub mod directory;
 pub mod filesystem;
 pub mod models;
@@ -17,6 +18,7 @@ pub mod reports;
 pub mod trash;
 
 pub use carving::FileCarver;
+pub use corruption::{CorruptionRepairEngine, CorruptionReport, CorruptionKind, RepairResult};
 pub use directory::DirectoryScanner;
 pub use filesystem::{
     ApfsAnalyzer, Ext4Analyzer, Fat32Analyzer, FilesystemDetector, NtfsAnalyzer,

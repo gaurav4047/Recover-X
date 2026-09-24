@@ -118,6 +118,7 @@ export function ScanSetupScreen() {
         ...selectedMode.config,
         deleted_after: null,
         deleted_before: null,
+        filter_prefix: null,
       };
 
       const session = await api.createSession(req);
@@ -194,13 +195,13 @@ export function ScanSetupScreen() {
         )}
 
         {/* Physical devices */}
-        {devices.length > 0 && (
+        {devices.filter(d => d.device_type !== "virtual").length > 0 && (
           <>
             <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
               Storage Devices
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "16px" }}>
-              {devices.map((dev) => (
+              {devices.filter(d => d.device_type !== "virtual").map((dev) => (
                 <button
                   key={dev.path}
                   onClick={() => dev.is_accessible && handleSelectDevice(dev)}
@@ -226,9 +227,6 @@ export function ScanSetupScreen() {
                       {!dev.is_accessible && " · No Access (grant Full Disk Access)"}
                     </div>
                   </div>
-                  <span style={{ fontSize: "0.65rem", padding: "2px 6px", borderRadius: "4px", background: dev.is_internal ? "#1d4ed855" : "#92400e55", color: dev.is_internal ? "#bfdbfe" : "#fde68a", flexShrink: 0 }}>
-                    {dev.is_internal ? "INTERNAL" : "EXTERNAL"}
-                  </span>
                 </button>
               ))}
             </div>

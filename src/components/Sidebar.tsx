@@ -6,7 +6,9 @@ const navItems = [
   { to: "/scan-setup", label: "Scan", icon: "🔍" },
   { to: "/results", label: "Results", icon: "📋" },
   { to: "/recovery", label: "Recovery", icon: "↗️" },
+  { to: "/corruption-repair", label: "Corrupt Repair", icon: "🛠️" },
   { to: "/sessions", label: "Sessions", icon: "🗂️" },
+  { to: "/secure-delete", label: "Secure Delete", icon: "🗑️" },
 ];
 
 export function Sidebar() {

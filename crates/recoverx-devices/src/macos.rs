@@ -255,6 +255,15 @@ fn parse_diskutil_info(path: &str, text: &str) -> Result<DeviceInfo> {
         }
     });
 
+    // Mark mounted disk images / virtual disks as Virtual so the UI can hide them
+    if display_name.to_lowercase().contains("disk image")
+        || display_name.to_lowercase().contains("apple disk image")
+        || (size_bytes > 0 && size_bytes < 64 * 1024 * 1024 && !is_internal
+            && device_type == DeviceType::Removable)
+    {
+        device_type = DeviceType::Virtual;
+    }
+
     Ok(DeviceInfo {
         path: path.to_string(),
         name: display_name,

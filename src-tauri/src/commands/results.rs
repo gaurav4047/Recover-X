@@ -287,3 +287,209 @@ fn copy_and_hash(src: &std::path::Path, dest: &std::path::Path) -> anyhow::Resul
 
     Ok((total, hex::encode(hasher.finalize())))
 }
+
+// ── Corrupted Data Recovery commands ──────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ScanCorruptionRequest {
+    /// Directory or file paths to scan for corruption.
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RepairCorruptedRequest {
+    /// Corruption reports to attempt repair on.
+    pub reports: Vec<recoverx_engines::CorruptionReport>,
+    /// Optional output directory. When non-empty the repaired file is written
+    /// there instead of replacing the original in-place.
+    pub output_dir: String,
+}
+
+/// Open a native folder-picker dialog and return the chosen path.
+/// Returns `None` if the user cancels.
+#[tauri::command]
+pub async fn open_folder_dialog(
+    app: tauri::AppHandle,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let folder = app
+        .dialog()
+        .file()
+        .set_title("Choose Output Folder for Repaired Files")
+        .blocking_pick_folder();
+    Ok(folder.map(|p| p.to_string()))
+}
+
+/// Open a native file-picker dialog and return the chosen path(s).
+/// Returns an empty vec if the user cancels.
+#[tauri::command]
+pub async fn open_file_dialog(
+    app: tauri::AppHandle,
+) -> Result<Vec<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let files = app
+        .dialog()
+        .file()
+        .set_title("Select Files to Securely Delete")
+        .blocking_pick_files();
+    Ok(files
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| p.to_string())
+        .collect())
+}
+
+/// Open a native folder-picker for secure-delete targets.
+/// Returns `None` if the user cancels.
+#[tauri::command]
+pub async fn open_target_folder_dialog(
+    app: tauri::AppHandle,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let folder = app
+        .dialog()
+        .file()
+        .set_title("Select Folder to Securely Delete")
+        .blocking_pick_folder();
+    Ok(folder.map(|p| p.to_string()))
+}
+
+/// Scan a list of files / directories and return a corruption report for each.
+#[tauri::command]
+pub async fn scan_for_corruption(
+    request: ScanCorruptionRequest,
+) -> Result<Vec<recoverx_engines::CorruptionReport>, String> {
+    use recoverx_engines::CorruptionRepairEngine;
+
+    let engine = CorruptionRepairEngine::new();
+    let mut reports = Vec::new();
+
+    for raw_path in &request.paths {
+        let path = std::path::Path::new(raw_path);
+
+        if path.is_file() {
+            reports.push(engine.scan(path));
+        } else if path.is_dir() {
+            // Walk directory up to 3 levels deep, skip hidden files
+            collect_files(path, 0, 3, &mut |file_path| {
+                reports.push(engine.scan(file_path));
+            });
+        } else {
+            reports.push(recoverx_engines::CorruptionReport {
+                path: raw_path.clone(),
+                size_bytes: 0,
+                format: String::new(),
+                corruption: recoverx_engines::CorruptionKind::Unknown,
+                description: format!("Path not found: {}", raw_path),
+                repairable: false,
+                repair_confidence: 0,
+            });
+        }
+    }
+
+    Ok(reports)
+}
+
+/// Attempt to repair files described by the provided corruption reports.
+///
+/// Behaviour depends on `output_dir`:
+///   - Empty string  → in-place repair (original overwritten, .bak backup created beside it)
+///   - Non-empty     → repaired copy written to output_dir/<filename>, original untouched
+#[tauri::command]
+pub async fn repair_corrupted_files(
+    request: RepairCorruptedRequest,
+) -> Result<Vec<recoverx_engines::RepairResult>, String> {
+    use recoverx_engines::CorruptionRepairEngine;
+
+    let output_to_dir = !request.output_dir.trim().is_empty();
+
+    // When writing to a separate output dir, create it first
+    if output_to_dir {
+        let out = std::path::Path::new(&request.output_dir);
+        std::fs::create_dir_all(out)
+            .map_err(|e| format!("Cannot create output directory '{}': {}", request.output_dir, e))?;
+    }
+
+    let engine = CorruptionRepairEngine::new();
+
+    let results = request.reports
+        .iter()
+        .map(|report| {
+            if output_to_dir {
+                // Derive a destination path inside the chosen output dir
+                let src = std::path::Path::new(&report.path);
+                let filename = src.file_name().unwrap_or_default();
+                let dest_path = std::path::Path::new(&request.output_dir).join(filename);
+
+                // If a file with the same name already exists, add a counter suffix
+                let dest_path = if dest_path.exists() {
+                    let stem = src.file_stem().unwrap_or_default().to_string_lossy();
+                    let ext  = src.extension()
+                        .map(|e| format!(".{}", e.to_string_lossy()))
+                        .unwrap_or_default();
+                    let mut i = 1u32;
+                    loop {
+                        let candidate = std::path::Path::new(&request.output_dir)
+                            .join(format!("{}_{}{}", stem, i, ext));
+                        if !candidate.exists() { break candidate; }
+                        i += 1;
+                    }
+                } else {
+                    dest_path
+                };
+
+                // Copy the original to dest, then repair dest in-place
+                match std::fs::copy(src, &dest_path) {
+                    Err(e) => recoverx_engines::RepairResult {
+                        original_path: report.path.clone(),
+                        repaired_path: String::new(),
+                        success: false,
+                        action: "Copy to output dir".into(),
+                        bytes_written: 0,
+                        error: Some(format!("Cannot copy to output folder: {}", e)),
+                    },
+                    Ok(_) => {
+                        // Build a synthetic report pointing at the copy so the
+                        // engine repairs the copy without touching the original
+                        let mut copy_report = report.clone();
+                        copy_report.path = dest_path.display().to_string();
+                        // output_dir arg is unused by the engine (in-place logic)
+                        let mut result = engine.repair(&copy_report, std::path::Path::new(&request.output_dir));
+                        // Always report back the original source path so the UI
+                        // shows the right file name
+                        result.original_path = report.path.clone();
+                        result
+                    }
+                }
+            } else {
+                // In-place: engine backs up and overwrites the original
+                engine.repair(report, std::path::Path::new(&request.output_dir))
+            }
+        })
+        .collect();
+
+    Ok(results)
+}
+
+/// Recursively collect files up to `max_depth` levels, calling `f` on each file.
+fn collect_files(
+    dir: &std::path::Path,
+    depth: usize,
+    max_depth: usize,
+    f: &mut impl FnMut(&std::path::Path),
+) {
+    if depth > max_depth { return; }
+    let Ok(entries) = std::fs::read_dir(dir) else { return; };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+        if name.starts_with('.') { continue; } // skip hidden
+        if path.is_dir() {
+            collect_files(&path, depth + 1, max_depth, f);
+        } else if path.is_file() {
+            f(&path);
+        }
+    }
+}

@@ -70,14 +70,17 @@ pub enum ScanMode {
     Deep,
     /// Signature-based carving only, skipping filesystem analysis.
     FileCarving,
+    /// Scan existing files on a live filesystem for structural corruption and repair them.
+    CorruptedDataRecovery,
 }
 
 impl std::fmt::Display for ScanMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ScanMode::Quick => write!(f, "Quick"),
-            ScanMode::Deep => write!(f, "Deep"),
-            ScanMode::FileCarving => write!(f, "File Carving"),
+            ScanMode::Quick                 => write!(f, "Quick"),
+            ScanMode::Deep                  => write!(f, "Deep"),
+            ScanMode::FileCarving           => write!(f, "File Carving"),
+            ScanMode::CorruptedDataRecovery => write!(f, "Corrupted Data Recovery"),
         }
     }
 }

@@ -26,6 +26,7 @@ recoverx-logging = { path = "../crates/recoverx-logging" }
 
 tauri = { version = "2.0", features = [] }
 tauri-plugin-shell = "2.0"
+tauri-plugin-dialog = "2.0"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
